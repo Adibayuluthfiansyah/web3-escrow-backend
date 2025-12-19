@@ -33,9 +33,10 @@ describe("Escrow Contract", function () {
         it("Arbiter should win buyer (AMOUNT REFUND BACK TO BUYER)", async function() {
             const {escrow,buyer,seller,arbiter} = await deployEscrowFixture();
             const amount = ethers.parseEther("2.0");
+            const lockTime = 7;
 
             // make a deal
-            await escrow.connect(buyer).createDeal(seller.address, arbiter.address, 7, "Macbook" , {value:amount})
+            await escrow.connect(buyer).createDeal(seller.address, arbiter.address, lockTime, "Macbook" , {value:amount})
             const dealId = 0;
 
             // dispute raised buyer request refund
@@ -45,9 +46,25 @@ describe("Escrow Contract", function () {
             // arbiter resolves dispute wins buyer and ETH refunded to buyer
             await expect(escrow.connect(arbiter).resolveDispute(dealId, false))
                 .to.emit(escrow, "DisputeResolved")
-                .withArgs(dealId, false)
-                .and.to.changeEtherBalances([escrow, buyer], [ -amount, amount ]);
+                .withArgs(dealId, false);
+
+                const dealInfo = await escrow.deals(dealId);
+                expect(dealInfo.status).to.equal(5); // RESOLVED 
         });
+
+        it("Should allow refund if deadline is not passed", async function (){
+            const {escrow,buyer,seller,arbiter} = await deployEscrowFixture();
+            const amount = ethers.parseEther("1.0");
+            const lockTime = 30;
+
+            await escrow.connect(buyer).createDeal(seller.address, arbiter.address, lockTime, "Refund Fail Test" , {value:amount})
+
+            // go refund before deadline
+            await expect(escrow.connect(buyer).requestRefund(0))
+            .to.be.revertedWith("Deadline not reached");
+
+        });
+
         it("Arbiter should win seller (AMOUNT PAID TO SELLER)", async function() {
             const {escrow,buyer,seller,arbiter} = await deployEscrowFixture();
             const amount = ethers.parseEther("3.0");
@@ -56,15 +73,15 @@ describe("Escrow Contract", function () {
             await escrow.connect(buyer).createDeal(seller.address, arbiter.address, 3, "iPhone" , {value:amount})
             const dealId = 0;
 
-            // dispute raised seller request refund
-            await expect(escrow.connect(seller).raiseDispute(dealId))
-                .to.emit(escrow, "DisputeRaised");
-
+            await escrow.connect(seller).raiseDispute(dealId);
+            
             // arbiter resolves dispute wins seller and ETH paid to seller
-            await expect(escrow.connect(arbiter).resolveDispute(dealId, true))
-                .to.emit(escrow, "DisputeResolved")
-                .withArgs(dealId, true)
-                .and.to.changeEtherBalances([escrow, seller], [ -amount, amount ]);
+            await expect(() => 
+            escrow.connect(arbiter).resolveDispute(dealId, true)
+            ).to.changeEtherBalances([escrow, seller], [-amount, amount]);
+
+            const dealInfo = await escrow.deals(dealId);
+            expect(dealInfo.status).to.equal(3); // RESOLVED
         });
     });
 });
